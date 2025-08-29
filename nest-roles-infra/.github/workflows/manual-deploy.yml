@@ -1,0 +1,153 @@
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+      artifact_url:
+        description: "S3 URL or artifact name (optional - will use latest if empty)"
+        required: false
+        type: string
+      skip_tests:
+        description: "Skip smoke tests"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  manual-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyyaml boto3
+
+      - name: Setup AWS SAM
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: sa-east-1
+
+      - name: Determine artifact to deploy
+        run: |
+          if [ -n "${{ github.event.inputs.artifact_url }}" ]; then
+            ARTIFACT_NAME="${{ github.event.inputs.artifact_url }}"
+            echo "📦 Usando artefato especificado: $ARTIFACT_NAME"
+          else
+            echo "🔍 Buscando artefato mais recente..."
+            LATEST_ARTIFACT=$(aws s3 ls s3://company-artifacts/nest-roles-app/ --recursive | sort | tail -n 1 | awk '{print $4}' | sed 's|nest-roles-app/||')
+            ARTIFACT_NAME="$LATEST_ARTIFACT"
+            echo "📦 Usando artefato mais recente: $ARTIFACT_NAME"
+          fi
+
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Download and validate artifact
+        run: |
+          mkdir -p artifacts
+          echo "📥 Baixando artefato: ${{ env.ARTIFACT_NAME }}"
+
+          aws s3 cp s3://company-artifacts/nest-roles-app/${{ env.ARTIFACT_NAME }} ./
+          tar -xzf ${{ env.ARTIFACT_NAME }} -C artifacts/
+
+          # Validar artefato
+          if [ ! -f "artifacts/dist/manifest.json" ]; then
+            echo "❌ Manifest não encontrado no artefato"
+            exit 1
+          fi
+
+          if [ ! -f "artifacts/app.config.json" ]; then
+            echo "❌ Configuração da aplicação não encontrada"
+            exit 1
+          fi
+
+          echo "✅ Artefato validado com sucesso"
+
+      - name: Review deployment configuration
+        run: |
+          echo "📋 CONFIGURAÇÃO DO DEPLOY MANUAL"
+          echo "================================="
+          echo "🌍 Ambiente: ${{ github.event.inputs.environment }}"
+          echo "📦 Artefato: ${{ env.ARTIFACT_NAME }}"
+          echo "👤 Executado por: ${{ github.actor }}"
+          echo "🧪 Pular testes: ${{ github.event.inputs.skip_tests }}"
+          echo ""
+
+          echo "📄 Informações do Manifest:"
+          cat artifacts/dist/manifest.json | jq .
+
+          echo ""
+          echo "⚠️  ATENÇÃO: Este é um deploy manual. Certifique-se de que:"
+          echo "   - O ambiente está correto"
+          echo "   - O artefato foi testado"
+          echo "   - Você tem autorização para este deploy"
+
+      - name: Deploy with SAM
+        run: |
+          echo "🚀 Executando deploy manual para ${{ github.event.inputs.environment }}"
+          python scripts/deploy.py \
+            --artifact-path artifacts \
+            --environment ${{ github.event.inputs.environment }} \
+            --no-confirm
+
+      - name: Run smoke tests
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: |
+          echo "🧪 Executando testes de fumaça..."
+
+          sleep 30
+
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name nest-roles-api-${{ github.event.inputs.environment }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$API_ENDPOINT" ]; then
+            echo "🌐 Testando endpoint: $API_ENDPOINT"
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_ENDPOINT" || echo "000")
+            
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; then
+              echo "✅ API está respondendo (Status: $HTTP_STATUS)"
+            else
+              echo "⚠️  API retornou status inesperado: $HTTP_STATUS"
+            fi
+          else
+            echo "⚠️  Não foi possível obter endpoint da API"
+          fi
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "📊 RESUMO DO DEPLOY MANUAL" >> $GITHUB_STEP_SUMMARY
+          echo "=========================" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artefato:** ${{ env.ARTIFACT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Executado por:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Data/Hora:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Deploy realizado com sucesso!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Deploy falhou. Verifique os logs acima.**" >> $GITHUB_STEP_SUMMARY
+          fi

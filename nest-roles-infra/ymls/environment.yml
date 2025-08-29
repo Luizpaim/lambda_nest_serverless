@@ -1,0 +1,14 @@
+# ===================================
+# 🌍 VARIÁVEIS DE AMBIENTE
+# ===================================
+
+# Ambiente da aplicação
+NODE_ENV: ${sls:stage}
+APP_ENVIRONMENT: ${sls:stage}
+
+# AWS Configuration
+APP_AWS_REGION: ${env:AWS_REGION, 'sa-east-1'}
+AWS_ACCOUNT_ID: ${env:AWS_ACCOUNT_ID, ''}
+
+# DynamoDB Tables
+DYNAMODB_TABLE_ROLES: ${sls:stage}-roles

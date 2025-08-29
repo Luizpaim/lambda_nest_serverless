@@ -1,0 +1,50 @@
+module.exports = {
+    moduleFileExtensions: ['js', 'json', 'ts'],
+    rootDir: '.',
+    testRegex: '.*\\.(spec|e2e-spec)\\.ts$',
+    transform: {
+        '^.+\\.ts$': 'ts-jest',
+    },
+    collectCoverageFrom: [
+        'src/**/*.(t|j)s',
+        '!src/**/*.module.ts',
+        '!src/main.ts',
+        '!src/index.ts',
+        '!**/*.dto.ts',
+        '!**/*.entity.ts',
+        '!**/*.interface.ts',
+        '!**/*.enum.ts',
+        '!**/*.constant.ts',
+        '!**/node_modules/**',
+        '!**/dist/**',
+        '!**/coverage/**',
+        '!**/*.config.js',
+        '!**/*.config.ts',
+    ],
+    coverageDirectory: './coverage',
+    coverageReporters: ['text', 'lcov', 'html', 'json'],
+    coverageThreshold: {
+        global: {
+            branches: 70,
+            functions: 70,
+            lines: 70,
+            statements: 70,
+        },
+    },
+    testEnvironment: 'node',
+    roots: ['<rootDir>/src/'],
+    moduleNameMapper: {
+        '^@src/(.*)$': '<rootDir>/src/$1',
+    },
+    setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+    testTimeout: 30000,
+    verbose: true,
+    forceExit: true,
+    clearMocks: true,
+    resetMocks: true,
+    restoreMocks: true,
+    // Configurações para detectar e lidar com handles abertos
+    detectOpenHandles: true,
+    // Configurações para melhor cleanup
+    injectGlobals: true,
+}

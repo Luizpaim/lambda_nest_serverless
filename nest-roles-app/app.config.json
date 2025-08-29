@@ -1,0 +1,52 @@
+{
+    "application": {
+        "name": "nest-roles-api",
+        "version": "1.0.0",
+        "runtime": "nodejs18.x",
+        "description": "NestJS Roles API with SOLID architecture"
+    },
+    "resources": {
+        "memory": 512,
+        "timeout": 30,
+        "handler": "main.handler",
+        "architecture": "x86_64"
+    },
+    "environment": {
+        "required": ["NODE_ENV", "DYNAMODB_TABLE_ROLES"],
+        "optional": ["LOG_LEVEL", "AWS_REGION", "DYNAMODB_ENDPOINT"]
+    },
+    "permissions": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+    ],
+    "api": {
+        "cors": {
+            "enabled": true,
+            "allowOrigin": "*",
+            "allowMethods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            "allowHeaders": ["Content-Type", "Authorization", "X-Api-Key"]
+        },
+        "throttling": {
+            "burstLimit": 100,
+            "rateLimit": 50
+        }
+    },
+    "database": {
+        "tables": [
+            {
+                "name": "roles",
+                "keySchema": {
+                    "partitionKey": "id"
+                },
+                "billingMode": "PAY_PER_REQUEST"
+            }
+        ]
+    }
+}

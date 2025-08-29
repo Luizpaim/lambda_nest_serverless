@@ -1,0 +1,40 @@
+# ===================================
+# 🚀 FUNÇÕES LAMBDA - CONFIGURAÇÃO ÚNICA
+# ===================================
+
+# Função única que lida com todas as rotas
+nestRolesApi:
+    handler: dist/main.handler
+    memorySize: 512
+    timeout: 30
+    environment:
+        NODE_ENV: ${sls:stage}
+    events:
+        # Captura TODAS as rotas com método ANY
+        - http:
+              path: /{proxy+}
+              method: ANY
+              cors:
+                  origin: '*'
+                  headers:
+                      - Content-Type
+                      - X-Amz-Date
+                      - Authorization
+                      - X-Api-Key
+                      - X-Amz-Security-Token
+                      - X-Amz-User-Agent
+                  allowCredentials: false
+        # Captura a rota raiz também
+        - http:
+              path: /
+              method: ANY
+              cors:
+                  origin: '*'
+                  headers:
+                      - Content-Type
+                      - X-Amz-Date
+                      - Authorization
+                      - X-Api-Key
+                      - X-Amz-Security-Token
+                      - X-Amz-User-Agent
+                  allowCredentials: false

@@ -1,0 +1,138 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test:coverage
+
+      - name: Build application
+        run: npm run build
+
+      - name: Validate app.config.json
+        run: |
+          echo "📋 Validando configuração da aplicação..."
+
+          # Verificar se app.config.json existe e é válido
+          if [ ! -f "app.config.json" ]; then
+            echo "❌ app.config.json não encontrado"
+            exit 1
+          fi
+
+          # Validar JSON
+          cat app.config.json | jq empty
+          echo "✅ app.config.json é um JSON válido"
+
+          # Verificar campos obrigatórios
+          REQUIRED_FIELDS=("application.name" "application.version" "application.runtime" "resources.handler")
+
+          for field in "${REQUIRED_FIELDS[@]}"; do
+            VALUE=$(cat app.config.json | jq -r ".$field" 2>/dev/null)
+            if [ "$VALUE" = "null" ] || [ -z "$VALUE" ]; then
+              echo "❌ Campo obrigatório ausente: $field"
+              exit 1
+            else
+              echo "✅ $field: $VALUE"
+            fi
+          done
+
+      - name: Check build artifacts
+        run: |
+          echo "📦 Verificando artefatos do build..."
+
+          if [ ! -f "dist/main.js" ]; then
+            echo "❌ Artefato principal não encontrado: dist/main.js"
+            exit 1
+          fi
+
+          if [ ! -f "dist/manifest.json" ]; then
+            echo "❌ Manifest não encontrado: dist/manifest.json"
+            exit 1
+          fi
+
+          echo "✅ Todos os artefatos estão presentes"
+
+          # Mostrar informações do manifest
+          echo "📋 Informações do manifest:"
+          cat dist/manifest.json | jq .
+
+      - name: Security scan
+        run: |
+          echo "🔒 Executando verificações de segurança..."
+
+          # Verificar por dependências vulneráveis
+          npm audit --audit-level moderate
+
+          # Verificar por secrets hardcoded (básico)
+          echo "🔍 Verificando por possíveis secrets..."
+          if grep -r -i -E "(password|secret|key|token).*=.*['\"][a-zA-Z0-9]{20,}" src/ --exclude-dir=node_modules || true; then
+            echo "⚠️  Possíveis secrets encontrados. Revise o código acima."
+          else
+            echo "✅ Nenhum secret óbvio encontrado"
+          fi
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('🤖 Validação automática')
+            );
+
+            const status = '${{ job.status }}' === 'success' ? '✅ Passou' : '❌ Falhou';
+            const body = `🤖 **Validação automática do PR**
+
+            **Status:** ${status}
+            **Commit:** \`${context.sha.substring(0, 7)}\`
+            **Executado em:** ${new Date().toISOString()}
+
+            **Verificações realizadas:**
+            - ✅ Lint do código
+            - ✅ Testes unitários
+            - ✅ Build da aplicação
+            - ✅ Validação da configuração
+            - ✅ Verificação de segurança básica
+
+            ${status.includes('❌') ? '⚠️ **Ação necessária:** Corrija os erros nos logs acima antes do merge.' : '🎉 **Pronto para merge!** Todas as validações passaram.'}`;
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }

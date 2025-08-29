@@ -1,0 +1,31 @@
+# Configurações específicas do ambiente STAGING
+application:
+  logLevel: info
+
+resources:
+  lambda:
+    memorySize: 768
+    timeoutSeconds: 30
+    reservedConcurrency: 5
+
+  api:
+    throttling:
+      burstLimit: 150
+      rateLimit: 75
+    caching:
+      enabled: true
+      ttlSeconds: 180
+
+database:
+  roles:
+    billingMode: PAY_PER_REQUEST
+    backupEnabled: true
+    pointInTimeRecovery: false
+
+monitoring:
+  xrayTracing: true
+  detailedMetrics: true
+
+security:
+  corsOrigins: ["https://staging.company.com"]
+  apiKeyRequired: false

@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: !Sub "${AppName} v${AppVersion} - Serverless Application"
+
+Parameters:
+  AppName:
+    Type: String
+    Description: Application name from manifest
+  AppVersion:
+    Type: String
+    Description: Application version from manifest
+  Environment:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+    Default: dev
+  RuntimeVersion:
+    Type: String
+    Default: nodejs18.x
+  HandlerFunction:
+    Type: String
+    Default: main.handler
+  MemorySize:
+    Type: Number
+    Default: 512
+  TimeoutSeconds:
+    Type: Number
+    Default: 30
+
+Globals:
+  Function:
+    Runtime: !Ref RuntimeVersion
+    Timeout: !Ref TimeoutSeconds
+    MemorySize: !Ref MemorySize
+    Environment:
+      Variables:
+        NODE_ENV: !Ref Environment
+
+Resources:
+  # Lambda Function
+  NestRolesApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AppName}-${Environment}"
+      CodeUri: ../artifacts/dist/
+      Handler: !Ref HandlerFunction
+
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_ROLES: !Sub "${Environment}-roles"
+
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref NestRolesApi
+            Path: /{proxy+}
+            Method: ANY
+
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${Environment}-roles"
+        - CloudWatchLogsFullAccess
+
+  # API Gateway
+  NestRolesApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Name: !Sub "${AppName}-${Environment}"
+
+      Cors:
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'*'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'*'"
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${NestRolesApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt NestRolesApiFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionArn"

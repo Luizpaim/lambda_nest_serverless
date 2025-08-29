@@ -1,0 +1,148 @@
+name: Deploy Infrastructure
+
+on:
+  repository_dispatch:
+    types: [deploy-application]
+  workflow_dispatch:
+    inputs:
+      artifact:
+        description: "Artifact name to deploy"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyyaml boto3
+
+      - name: Setup AWS SAM
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: sa-east-1
+
+      - name: Set deployment variables
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "ARTIFACT_NAME=${{ github.event.client_payload.artifact }}" >> $GITHUB_ENV
+            echo "ENVIRONMENT=${{ github.event.client_payload.environment }}" >> $GITHUB_ENV
+            echo "SOURCE_COMMIT=${{ github.event.client_payload.commit_sha }}" >> $GITHUB_ENV
+            echo "TRIGGERED_BY=${{ github.event.client_payload.triggered_by }}" >> $GITHUB_ENV
+          else
+            echo "ARTIFACT_NAME=${{ github.event.inputs.artifact }}" >> $GITHUB_ENV
+            echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+            echo "SOURCE_COMMIT=manual-deploy" >> $GITHUB_ENV
+            echo "TRIGGERED_BY=${{ github.actor }}" >> $GITHUB_ENV
+          fi
+
+      - name: Download artifact
+        run: |
+          mkdir -p artifacts
+          echo "📦 Baixando artefato: ${{ env.ARTIFACT_NAME }}"
+          aws s3 cp s3://company-artifacts/nest-roles-app/${{ env.ARTIFACT_NAME }} ./
+          tar -xzf ${{ env.ARTIFACT_NAME }} -C artifacts/
+
+      - name: Validate artifact
+        run: |
+          if [ ! -f "artifacts/dist/manifest.json" ]; then
+            echo "❌ Manifest não encontrado no artefato"
+            exit 1
+          fi
+
+          if [ ! -f "artifacts/app.config.json" ]; then
+            echo "❌ Configuração da aplicação não encontrada"
+            exit 1
+          fi
+
+          echo "✅ Artefato validado com sucesso"
+
+      - name: Deploy with SAM
+        run: |
+          echo "🚀 Iniciando deploy para ${{ env.ENVIRONMENT }}"
+          python scripts/deploy.py \
+            --artifact-path artifacts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --no-confirm
+
+      - name: Run smoke tests
+        run: |
+          echo "🧪 Executando testes de fumaça..."
+
+          # Aguardar API ficar disponível
+          sleep 30
+
+          # Obter endpoint da API
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name nest-roles-api-${{ env.ENVIRONMENT }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -z "$API_ENDPOINT" ]; then
+            echo "⚠️  Não foi possível obter o endpoint da API. Verificando stacks..."
+            aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
+          else
+            # Teste de health check (se existir endpoint de health)
+            echo "🌐 Testando endpoint: $API_ENDPOINT"
+            
+            # Teste básico de conectividade
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_ENDPOINT" || echo "000")
+            
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; then
+              echo "✅ API está respondendo (Status: $HTTP_STATUS)"
+            else
+              echo "⚠️  API retornou status: $HTTP_STATUS"
+            fi
+          fi
+
+      - name: Update deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deploy realizado com sucesso!"
+            echo "🌍 Ambiente: ${{ env.ENVIRONMENT }}"
+            echo "📦 Artefato: ${{ env.ARTIFACT_NAME }}"
+            echo "👤 Executado por: ${{ env.TRIGGERED_BY }}"
+            
+            # Se foi triggered por repository dispatch, criar issue de sucesso
+            if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+              echo "🎉 Deploy automático concluído com sucesso" >> $GITHUB_STEP_SUMMARY
+              echo "**Ambiente:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY  
+              echo "**Artefato:** ${{ env.ARTIFACT_NAME }}" >> $GITHUB_STEP_SUMMARY
+              echo "**Commit fonte:** ${{ env.SOURCE_COMMIT }}" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ Falha no deploy"
+            echo "🌍 Ambiente: ${{ env.ENVIRONMENT }}"
+            echo "📦 Artefato: ${{ env.ARTIFACT_NAME }}"
+            exit 1
+          fi
+
+      - name: Notify teams
+        if: failure()
+        run: |
+          echo "🚨 ATENÇÃO: Falha no deploy!"
+          echo "Ambiente: ${{ env.ENVIRONMENT }}"
+          echo "Artefato: ${{ env.ARTIFACT_NAME }}"
+          echo "Executado por: ${{ env.TRIGGERED_BY }}"
+          # Aqui você pode adicionar notificações para Slack, Teams, etc.

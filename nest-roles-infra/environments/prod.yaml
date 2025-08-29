@@ -1,0 +1,31 @@
+# Configurações específicas do ambiente PROD
+application:
+  logLevel: info
+
+resources:
+  lambda:
+    memorySize: 1024
+    timeoutSeconds: 30
+    reservedConcurrency: 10
+
+  api:
+    throttling:
+      burstLimit: 200
+      rateLimit: 100
+    caching:
+      enabled: true
+      ttlSeconds: 300
+
+database:
+  roles:
+    billingMode: PAY_PER_REQUEST
+    backupEnabled: true
+    pointInTimeRecovery: true
+
+monitoring:
+  xrayTracing: true
+  detailedMetrics: true
+
+security:
+  corsOrigins: ["https://app.company.com"]
+  apiKeyRequired: true

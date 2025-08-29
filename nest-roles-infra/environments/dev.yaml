@@ -1,0 +1,30 @@
+# Configurações específicas do ambiente DEV
+application:
+  logLevel: debug
+
+resources:
+  lambda:
+    memorySize: 512
+    timeoutSeconds: 30
+    reservedConcurrency: null
+
+  api:
+    throttling:
+      burstLimit: 100
+      rateLimit: 50
+    caching:
+      enabled: false
+
+database:
+  roles:
+    billingMode: PAY_PER_REQUEST
+    backupEnabled: false
+    pointInTimeRecovery: false
+
+monitoring:
+  xrayTracing: false
+  detailedMetrics: true
+
+security:
+  corsOrigins: ["*"]
+  apiKeyRequired: false
